@@ -1,0 +1,149 @@
+---
+title: "NPL - aula 2 script 3"
+output:
+  html_document:
+    df_print: paged
+---
+
+# PWD
+```{r}
+setwd("./R")
+getwd()
+```
+
+# Pacotes
+```{r}
+library("pacman")
+
+pacman::p_load(
+  readxl,
+  tm,
+  wordcloud,
+  e1071,
+  gmodels,
+  SnowballC,
+  caret,
+  dplyr,
+  stringi
+)
+```
+
+
+# Pegando os dados
+```{r}
+setwd("./R")
+data <- read.csv("./Datasets/reviews_train.csv", sep = ",",header = FALSE)
+custom_stopwords <- fromJSON("../Datasets/default_stopwords.json")
+rm_accent <- function(x) {
+  stri_trans_general(x, "Latin-ASCII")
+}
+
+dataFiltered <- data %>% select(V4,V14) %>% filter(V14 == c(0, 2)) %>% head(150000)
+
+colnames(dataFiltered) <- c("text","sentiment")
+
+dataPositive <- dataFiltered %>% filter(sentiment == 2) %>% nrow()
+dataNegative <- dataFiltered %>% filter(sentiment == 0) %>% nrow()
+
+print(dataPositive)
+print(dataNegative)
+
+```
+
+
+#Data Cleaning
+```{r}
+#Train set
+corpus = VCorpus(VectorSource(dataFiltered$text)) 
+corpus = tm_map(corpus, content_transformer(tolower)) 
+corpus = tm_map(corpus, removeNumbers) 
+corpus = tm_map(corpus, removePunctuation) 
+corpus = tm_map(corpus, content_transformer(rm_accent))
+corpus = tm_map(corpus, removeWords, custom_stopwords)
+corpus = tm_map(corpus, stemDocument) 
+corpus = tm_map(corpus, stripWhitespace) 
+as.character(corpus[[1]])
+```
+
+
+#Document Term Matrix
+```{r}
+dtm = DocumentTermMatrix(corpus) 
+inspect(dtm) 
+dim(dtm) 
+dtm = removeSparseTerms(dtm, 0.999) 
+inspect(dtm)
+
+convert <- function(x) 
+  {
+y <- ifelse(x > 0, 1,0)
+y <- factor(y, levels=c(0,1), labels=c("No", "Yes"))
+y
+  }  
+    
+datanaive = apply(dtm, 2, convert)
+
+dataset = as.data.frame(as.matrix(datanaive))    
+dataset$Class = factor(dataFiltered$sentiment)
+```
+
+#Modelagem
+```{r}
+#Train test Split
+
+set.seed(31)
+split = sample(2,nrow(dataset),prob = c(0.75,0.25),replace = TRUE)
+train_set = dataset[split == 1,]
+test_set = dataset[split == 2,] 
+    
+prop.table(table(train_set$Class))
+prop.table(table(test_set$Class))
+
+classifier_nb <- naiveBayes(train_set[1:1429], train_set$Class)
+```
+
+#Predição do test set
+```{r}
+nb_pred = predict(classifier_nb, type = 'class', newdata =  test_set[1:1429])
+matriz_confusao = confusionMatrix(nb_pred,test_set$Class)
+```
+
+#Análises
+```{r}
+accuracy <- matriz_confusao$overall["Accuracy"]
+precision <- matriz_confusao$byClass["Precision"]
+recall <- matriz_confusao$byClass["Recall"]
+f1 <- matriz_confusao$byClass["F1"]
+#verdadeiros_positivos <- matriz_confusao$table["Yes", "Yes"]
+#falsos_positivos <- matriz_confusao$table["Yes", "No"]
+#verdadeiros_negativos <- matriz_confusao$table["No", "No"]
+#falsos_negativos <- matriz_confusao$table["No", "Yes"]
+
+# Recuperando índices de falsos positivos e falsos negativos
+#falsos_positivos_idx <- which(previsoes == "Positivo" & dados_teste$classe == "Negativo")
+#falsos_negativos_idx <- which(previsoes == "Negativo" & dados_teste$classe == "Positivo")
+
+# Recuperando 10 falsos positivos e falsos negativos para análise manual
+#falsos_positivos <- dados_teste[falsos_positivos_idx[1:10], ]
+#falsos_negativos <- dados_teste[falsos_negativos_idx[1:10], ]
+
+print(matriz_confusao)
+```
+
+# Salvando o modelo
+```{r}
+setwd("/Users/gbernini/Projects/MarcelaTCC/R")
+saveRDS(classifier_nb, file = "Output/models/nb_generic_reviews_v1.1.rds")
+```
+
+# Usando o modelo
+```{r}
+novo_comentario <- "odiei o app, deixou com problemas financeiros ainda maiores"
+novo_dataframe <- data.frame(Comentario = novo_comentario)
+
+# Aplicar o modelo de classificação no novo comentário
+nb_pred_novo <- predict(classifier_nb, type = 'class', newdata = novo_dataframe)
+
+# Visualizar a predição
+print(nb_pred_novo)
+```

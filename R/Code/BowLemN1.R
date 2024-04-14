@@ -1,0 +1,103 @@
+library("pacman")
+
+pacman::p_load(
+  dplyr,
+  ggraph,
+  textstem,
+  wordcloud,
+  tm,
+  tidytext,
+  stringr,
+  SnowballC,
+  widyr,
+  ggraph,
+  igraph,
+  lexiconPT,
+  ggplot2,
+  tidyr,
+  text2vec,
+  jsonlite,
+  readxl,
+  stringi
+)
+
+# Sentando o diretório padrão, rode PWD no terminal
+setwd("./R")
+getwd()
+
+rm_accent <- function(x) {
+  stri_trans_general(x, "Latin-ASCII")
+}
+
+store <- c("apple", "google", "apple", "google", "apple", "google", "apple", "google")
+company <- c("nubank", "nubank", "itau", "itau", "bb", "bb", "all", "all")
+combinacoes <- data.frame(store, company)
+
+pal <- brewer.pal(8,"Dark2")
+stopwords_ptbr <- stopwords("pt")
+custom_stopwords <- fromJSON("../Datasets/custom_stopwords.json")
+stopwords_final <- c(stopwords_ptbr, custom_stopwords)
+
+reviews_words_lem <- read_xlsx("./Datasets/total-words-20000-lemmatizated.xlsx")
+reviews_words_lem <- transform(reviews_words_lem, company = "all") %>%
+  rbind(reviews_words_lem)
+reviews_words_lem$id <- seq.int(nrow(reviews_words_lem))
+reviews_words_lem <- reviews_words_lem %>% select(id, company, store, content)
+reviews_words_lem <- reviews_words_lem %>%
+  mutate(store = tolower(store))
+
+for (i in 1:nrow(combinacoes)) {
+  companyName <- combinacoes$company[i]
+  storeName <- combinacoes$store[i]
+  #companyName <- "bb"
+  #storeName <- "apple"
+  output <- paste0(companyName, "-", storeName)
+  fileBow <- paste0("Output/lem_bow_n1/", output, "-bow-n1-lem-wordcloud.png")
+  fileBar <- paste0("Output/lem_bow_n1/", output, "-bow-n1-lem-bar.png")
+  
+  reviews_words_by_company <- reviews_words_lem %>% filter(company == companyName, store == storeName)
+  
+  tokens <- reviews_words_by_company %>%
+    unnest_tokens(word, content)
+  
+  tokens <- tokens %>% select(id, company, store, word)
+  
+  #chartr("áàãâéèêíìóòõôúù", "aaaaeeeiioooouu", "olá")
+  
+  corpus = VCorpus(VectorSource(tokens$word))
+  corpus = tm_map(corpus, content_transformer(tolower)) 
+  #corpus = tm_map(corpus, removeNumbers) 
+  #corpus = tm_map(corpus, removePunctuation) # Não está funcionando
+  corpus = tm_map(corpus, content_transformer(rm_accent))
+  corpus = tm_map(corpus, removeWords, stopwords_final)
+  corpus = tm_map(corpus, stripWhitespace) 
+  
+  content <- sapply(corpus, as.character)
+  df <- data.frame(text = content)
+  names(df) <- c("word")
+  df <- df %>% filter(word != "")
+  
+  bow <- df %>% count(word, sort = TRUE)
+  
+  png(fileBow, width = 1200, height = 1200, res = 200)
+  bow_wordcloud <- bow %>% 
+    with(wordcloud(word, n, random.order = FALSE, max.words = 50, colors=pal))
+  dev.off()
+  
+  print(paste('Wordcloud generated', output))
+  
+  graph_data <- head(bow, 15)
+  graph_data <- graph_data %>%
+    mutate(word = forcats::fct_reorder(word, desc(n))) 
+  
+  graph <- ggplot(graph_data, aes(x = n, y = forcats::fct_rev(forcats::fct_infreq(word)))) +
+    geom_bar(stat = "identity", fill = "skyblue") +
+    geom_text(aes(label=n), vjust=0.5, hjust=1.2) + 
+    labs(title = "Bag of words n1 lem", x = "Frequência", y = "Palavra")
+  
+  print(paste('ggplot generated', output))
+  
+  ggsave(fileBar, plot = graph, width = 10, height = 6, units = "in")
+  
+  print(paste(output, 'finished'))
+}
